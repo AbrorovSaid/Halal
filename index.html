@@ -9,6 +9,35 @@
     <meta property="og:description" content="Учёт загрузки машин, забоя скота, объёмов мяса (кг/т), видеофиксация и автоматическое сохранение отчётов на Google Диск с доступом для руководителя." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        try {
+          const originalFetch = window.fetch ? window.fetch.bind(window) : null;
+          let currentFetch = originalFetch;
+          Object.defineProperty(window, 'fetch', {
+            get() {
+              return currentFetch;
+            },
+            set(newFetch) {
+              currentFetch = newFetch;
+            },
+            configurable: true,
+            enumerable: true,
+          });
+        } catch (e) {}
+
+        window.addEventListener('error', function(event) {
+          if (
+            (event.filename && event.filename.includes('chrome-extension://')) ||
+            (event.message && event.message.includes('Cannot set property fetch'))
+          ) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return true;
+          }
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
