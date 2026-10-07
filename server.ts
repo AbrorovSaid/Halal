@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // Setup directories for persistent data & media uploads
 const DATA_DIR = path.join(__dirname, 'data');
@@ -303,18 +303,54 @@ app.post('/api/upload-video', upload.single('video'), (req, res) => {
   }
 });
 
-// Start Express server and mount Vite in development
+function getDistPath(): string | null {
+  const possiblePaths = [
+    path.join(__dirname, 'dist'),
+    __dirname,
+    path.join(process.cwd(), 'dist'),
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(path.join(p, 'index.html'))) {
+      return p;
+    }
+  }
+  return null;
+}
+
+// Start Express server and mount Vite in dev or static in production
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = getDistPath();
+
+  if (process.env.NODE_ENV !== 'production' || !distPath) {
+    if (!distPath && process.env.NODE_ENV === 'production') {
+      console.log('Pre-built dist/index.html not found. Starting dynamic Vite middleware...');
+    }
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // Serve HTML for SPA routes through Vite
+    app.get('*', async (req, res, next) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+        return next();
+      }
+      try {
+        const indexPath = path.join(__dirname, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          let html = fs.readFileSync(indexPath, 'utf-8');
+          html = await vite.transformIndexHtml(req.originalUrl, html);
+          return res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+        }
+        res.status(404).send('index.html not found');
+      } catch (err) {
+        next(err);
+      }
+    });
   } else {
-    // In production, serve static dist
-    const distPath = path.join(__dirname, 'dist');
+    console.log(`Serving pre-built application from ${distPath}`);
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
