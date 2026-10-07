@@ -190,8 +190,7 @@ export const BossReportDashboard: React.FC<BossReportDashboardProps> = ({
   const exportToCsv = () => {
     const headers = [
       'Дата',
-      'Бригада',
-      'Мастер',
+      'Контролёр',
       'Машин загружено (шт)',
       'Быков забито (гол)',
       'Мясо (кг)',
@@ -546,9 +545,15 @@ export const BossReportDashboard: React.FC<BossReportDashboardProps> = ({
       {sortedShifts.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
           <Beef className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <p className="text-base font-semibold text-slate-200">По выбранным фильтрам смен не найдено</p>
+          <p className="text-base font-semibold text-slate-200">
+            {shifts.length === 0
+              ? 'В журнале пока нет смен'
+              : 'По выбранным фильтрам смен не найдено'}
+          </p>
           <p className="text-xs text-slate-500 mt-1">
-            Попробуйте сбросить параметры поиска или добавить новую смену
+            {shifts.length === 0
+              ? 'Внесите первую рабочую смену во вкладке «Внесение смены»'
+              : 'Попробуйте сбросить параметры поиска'}
           </p>
           <button
             onClick={() => {
@@ -642,7 +647,7 @@ export const BossReportDashboard: React.FC<BossReportDashboardProps> = ({
                         ))}
                     </div>
                   </th>
-                  <th className="py-3.5 px-4">Бригада / Мастер</th>
+                  <th className="py-3.5 px-4">Контролёр</th>
                   <th className="py-3.5 px-4 text-center">Видео</th>
                   <th className="py-3.5 px-4 text-center">Google Диск</th>
                   <th className="py-3.5 px-4 text-center">Статус</th>

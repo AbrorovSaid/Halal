@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Truck,
   Beef,
@@ -6,8 +6,6 @@ import {
   Video,
   Upload,
   Calendar,
-  Clock,
-  UserCheck,
   FileText,
   CheckCircle2,
   AlertCircle,
@@ -16,9 +14,15 @@ import {
   HardDrive,
   Share2,
   Trash2,
-  Play
+  Play,
+  UserCheck,
+  User,
+  X
 } from 'lucide-react';
 import { ShiftReport } from '../types/shift';
+
+const CONTROLLER_STORAGE_KEY = 'pinsk_controller_name';
+const CONTROLLER_HISTORY_KEY = 'pinsk_controllers_list';
 
 interface ShiftEntryFormProps {
   onSaveShift: (
@@ -34,15 +38,66 @@ export const ShiftEntryForm: React.FC<ShiftEntryFormProps> = ({
   isDriveConnected,
   onOpenShareModal,
 }) => {
-  // Form State
+  // Form State - Clean blank slate
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [brigade, setBrigade] = useState<string>('Бригада №1 (Ашраф А.)');
-  const [supervisorName, setSupervisorName] = useState<string>('Ашраф Аброров');
-  const [trucksLoaded, setTrucksLoaded] = useState<number>(4);
-  const [bullsSlaughtered, setBullsSlaughtered] = useState<number>(42);
-  const [meatWeightKg, setMeatWeightKg] = useState<number>(13440);
-  const [truckDetails, setTruckDetails] = useState<string>('КамАЗ 712 (3.2 т), МАН 890 (3.4 т), Вольво 430 (3.4 т), КамАЗ 115 (3.44 т)');
-  const [notes, setNotes] = useState<string>('Забой проведён в штатном режиме. Ветеринарный контроль пройден, полутуши заклеймены и охлаждены до +2°C.');
+  const [brigade, setBrigade] = useState<string>('');
+  
+  // Controller profile persistence - starts completely clean
+  const [supervisorName, setSupervisorName] = useState<string>(() => {
+    const saved = localStorage.getItem(CONTROLLER_STORAGE_KEY) || '';
+    if (saved === 'Ашраф Аброров' || saved === 'Бахром Каримов') {
+      localStorage.removeItem(CONTROLLER_STORAGE_KEY);
+      return '';
+    }
+    return saved;
+  });
+  const [savedControllers, setSavedControllers] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(CONTROLLER_HISTORY_KEY);
+      if (stored) {
+        const parsed: string[] = JSON.parse(stored);
+        const filtered = parsed.filter(
+          (n) => n !== 'Ашраф Аброров' && n !== 'Бахром Каримов'
+        );
+        return filtered;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  });
+  const [showControllerModal, setShowControllerModal] = useState<boolean>(false);
+  const [newControllerInput, setNewControllerInput] = useState<string>('');
+
+  // Handle Controller Registration / Selection
+  const handleSelectController = (name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setSupervisorName(clean);
+    localStorage.setItem(CONTROLLER_STORAGE_KEY, clean);
+
+    setSavedControllers((prev) => {
+      const list = prev.includes(clean) ? prev : [clean, ...prev];
+      localStorage.setItem(CONTROLLER_HISTORY_KEY, JSON.stringify(list));
+      return list;
+    });
+    setShowControllerModal(false);
+    setNewControllerInput('');
+  };
+
+  const handleControllerInputChange = (val: string) => {
+    setSupervisorName(val);
+    if (val.trim()) {
+      localStorage.setItem(CONTROLLER_STORAGE_KEY, val.trim());
+    } else {
+      localStorage.removeItem(CONTROLLER_STORAGE_KEY);
+    }
+  };
+  const [trucksLoaded, setTrucksLoaded] = useState<number>(0);
+  const [bullsSlaughtered, setBullsSlaughtered] = useState<number>(0);
+  const [meatWeightKg, setMeatWeightKg] = useState<number>(0);
+  const [truckDetails, setTruckDetails] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
 
   // Video State
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -219,8 +274,8 @@ export const ShiftEntryForm: React.FC<ShiftEntryFormProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Shift Metadata Row: Date, Brigade, Supervisor */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Shift Metadata Row: Date, Supervisor */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Date */}
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1 flex items-center gap-1.5">
@@ -236,36 +291,40 @@ export const ShiftEntryForm: React.FC<ShiftEntryFormProps> = ({
               />
             </div>
 
-            {/* Brigade */}
+            {/* Controller / Supervisor Name with Auto-Memory */}
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1 flex items-center gap-1.5">
-                <UserCheck className="w-3.5 h-3.5 text-amber-400" />
-                <span>Бригада цеха</span>
-              </label>
-              <input
-                type="text"
-                value={brigade}
-                onChange={(e) => setBrigade(e.target.value)}
-                placeholder="Бригада №1"
-                required
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500"
-              />
-            </div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+                  <UserCheck className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Контролёр</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowControllerModal(true)}
+                  className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold hover:underline flex items-center gap-1"
+                >
+                  <User className="w-3 h-3" />
+                  <span>Сменить профиль</span>
+                </button>
+              </div>
 
-            {/* Supervisor Name */}
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1 flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-amber-400" />
-                <span>Мастер / Бригадир</span>
-              </label>
-              <input
-                type="text"
-                value={supervisorName}
-                onChange={(e) => setSupervisorName(e.target.value)}
-                placeholder="ФИО бригадира"
-                required
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={supervisorName}
+                  onChange={(e) => handleControllerInputChange(e.target.value)}
+                  placeholder="ФИО контролёра"
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-sm text-white focus:outline-none pr-24 shadow-inner"
+                />
+                <span className="absolute right-2.5 top-2 text-[10px] bg-emerald-950/80 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-800/60 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-2.5 h-2.5" />
+                  Авто
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                <span>✓ Запомнено для ваших смен. Имя подставляется автоматически.</span>
+              </p>
             </div>
           </div>
 
@@ -441,33 +500,18 @@ export const ShiftEntryForm: React.FC<ShiftEntryFormProps> = ({
             </div>
           </div>
 
-          {/* Details & Inspection Notes */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">
-                Номера машин / Марки / Накладные (для отчёта руководству)
-              </label>
-              <textarea
-                rows={2}
-                value={truckDetails}
-                onChange={(e) => setTruckDetails(e.target.value)}
-                placeholder="Пример: КамАЗ 712 (3.1 т), МАН 890 (3.2 т)..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 placeholder:text-slate-600"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">
-                Примечания ветеринарного контроля и качество полутуш
-              </label>
-              <textarea
-                rows={2}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Состояние туш, ветклеймо, температура хранения, инциденты смены..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 placeholder:text-slate-600"
-              />
-            </div>
+          {/* Details: Trucks & Waybills */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">
+              Номера машин / Марки / Накладные (для отчёта руководству)
+            </label>
+            <textarea
+              rows={2}
+              value={truckDetails}
+              onChange={(e) => setTruckDetails(e.target.value)}
+              placeholder="Пример: КамАЗ 712 (3.1 т), МАН 890 (3.2 т)..."
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 placeholder:text-slate-600"
+            />
           </div>
 
           {/* Video Attachment Section */}
@@ -595,6 +639,106 @@ export const ShiftEntryForm: React.FC<ShiftEntryFormProps> = ({
           </div>
         </form>
       </div>
+      {/* Controller Registration / Switcher Modal */}
+      {showControllerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl text-white">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white">Авторизация контролёра</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Имя сохраняется на устройстве и подставляется во все смены
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowControllerModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Зарегистрировать новое ФИО:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newControllerInput}
+                    onChange={(e) => setNewControllerInput(e.target.value)}
+                    placeholder="Например: Иванов Иван И."
+                    className="flex-1 bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSelectController(newControllerInput);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSelectController(newControllerInput)}
+                    disabled={!newControllerInput.trim()}
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-semibold text-xs transition-colors"
+                  >
+                    Запомнить
+                  </button>
+                </div>
+              </div>
+
+              {savedControllers.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-2">
+                    Или выберите сохранённого контролёра:
+                  </label>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {savedControllers.map((ctrl) => (
+                      <button
+                        key={ctrl}
+                        type="button"
+                        onClick={() => handleSelectController(ctrl)}
+                        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-xs font-medium transition-colors text-left ${
+                          supervisorName === ctrl
+                            ? 'bg-amber-950/50 border-amber-500 text-amber-300'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <User className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{ctrl}</span>
+                        </span>
+                        {supervisorName === ctrl && (
+                          <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                            Активен
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowControllerModal(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

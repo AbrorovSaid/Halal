@@ -19,6 +19,13 @@ import {
   syncSummaryCsvToDrive,
   deleteDriveFileWithConfirmation,
 } from './services/googleDrive';
+import {
+  getLocalShifts,
+  saveLocalShift,
+  updateLocalShift,
+  deleteLocalShift,
+  getLocalVideoUrl,
+} from './services/storage';
 
 export default function App() {
   // Navigation & View Mode
@@ -55,27 +62,40 @@ export default function App() {
     if (params.get('view') === 'boss') {
       setActiveTab('boss');
     }
+
+    // Clean out any legacy mock data from browser storage
+    try {
+      const ctrl = localStorage.getItem('pinsk_controller_name');
+      if (ctrl === 'Ашраф Аброров' || ctrl === 'Бахром Каримов') {
+        localStorage.removeItem('pinsk_controller_name');
+      }
+      localStorage.removeItem('pinsk_controllers_list');
+
+      const backup = localStorage.getItem('pinsk_meat_shifts_backup');
+      if (backup) {
+        const parsed = JSON.parse(backup);
+        const filtered = parsed.filter(
+          (s: any) => !s.id.startsWith('shift-10') && s.supervisorName !== 'Ашраф Аброров'
+        );
+        localStorage.setItem('pinsk_meat_shifts_backup', JSON.stringify(filtered));
+      }
+    } catch {}
   }, []);
 
-  // 2. Fetch shifts from backend database
+  // 2. Fetch shifts from reliable local storage
   const loadShifts = useCallback(async () => {
     try {
       setIsLoadingShifts(true);
-      const res = await fetch('/api/shifts');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.shifts) {
-          setShifts(data.shifts);
+      const list = await getLocalShifts();
+      setShifts(list);
 
-          // If a specific shift was requested in URL query, highlight/open it
-          const params = new URLSearchParams(window.location.search);
-          const shiftId = params.get('shiftId');
-          if (shiftId) {
-            const found = data.shifts.find((s: ShiftReport) => s.id === shiftId);
-            if (found && (found.videoUrl || found.driveFileUrl)) {
-              setSelectedVideoShift(found);
-            }
-          }
+      // Check if specific shift requested in URL
+      const params = new URLSearchParams(window.location.search);
+      const shiftId = params.get('shiftId');
+      if (shiftId) {
+        const found = list.find((s) => s.id === shiftId);
+        if (found && (found.videoUrl || found.driveFileUrl)) {
+          setSelectedVideoShift(found);
         }
       }
     } catch (err) {
@@ -120,7 +140,6 @@ export default function App() {
       if (result) {
         setUser(result.user);
         showToast('Google Диск успешно подключен!', 'success');
-        // Fetch or create Drive folder
         const folder = await getOrCreateDriveFolder(result.accessToken);
         setDriveFolderId(folder.id);
         if (folder.webViewLink) setDriveFolderUrl(folder.webViewLink);
@@ -141,32 +160,24 @@ export default function App() {
     showToast('Вы вышли из Google аккаунта', 'info');
   };
 
-  // 4. Save shift workflow (Local DB + Optional Upload + Google Drive Sync)
+  // 4. Save shift workflow (Local Storage + Google Drive Sync)
   const handleSaveShift = async (
     shiftData: Omit<ShiftReport, 'id' | 'createdAt' | 'updatedAt' | 'verifiedByBoss' | 'verifiedAt'>,
     videoFile: File | null
   ): Promise<{ success: boolean; shift?: ShiftReport; error?: string }> => {
     try {
-      let serverVideoUrl = '';
+      const shiftId = `shift-${Date.now()}`;
+      let videoUrl = '';
       let driveFileId: string | null = null;
       let driveFileUrl: string | null = null;
       let isSynced = false;
 
-      // A. Upload video to local server storage if present
+      // If video file provided, create playback URL
       if (videoFile) {
-        const formData = new FormData();
-        formData.append('video', videoFile);
-        const uploadRes = await fetch('/api/upload-video', {
-          method: 'POST',
-          body: formData,
-        });
-        if (uploadRes.ok) {
-          const uploadJson = await uploadRes.json();
-          serverVideoUrl = uploadJson.videoUrl;
-        }
+        videoUrl = URL.createObjectURL(videoFile);
       }
 
-      // B. If Google Drive is authenticated, upload video and records to Drive!
+      // If Google Drive connected, upload directly to Google Drive
       const accessToken = await getAccessToken();
       if (accessToken) {
         try {
@@ -178,7 +189,6 @@ export default function App() {
             if (folder.webViewLink) setDriveFolderUrl(folder.webViewLink);
           }
 
-          // Upload video to Google Drive
           if (videoFile && folderId) {
             const driveVideo = await uploadFileToGoogleDrive(
               videoFile,
@@ -192,48 +202,40 @@ export default function App() {
 
           isSynced = true;
         } catch (driveErr) {
-          console.warn('Could not sync video to Drive directly:', driveErr);
+          console.warn('Google Drive direct upload notice:', driveErr);
         }
       }
 
-      // C. Save shift to backend API
-      const newShiftPayload = {
+      const newShift: ShiftReport = {
         ...shiftData,
-        videoUrl: serverVideoUrl,
+        id: shiftId,
+        videoUrl: videoUrl || undefined,
         driveFileId,
         driveFileUrl,
         driveFolderUrl,
         syncedToDrive: isSynced,
+        verifiedByBoss: false,
+        verifiedAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
 
-      const res = await fetch('/api/shifts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newShiftPayload),
-      });
+      // Save locally (IndexedDB + localStorage backup)
+      await saveLocalShift(newShift, videoFile);
 
-      if (!res.ok) {
-        throw new Error('Ошибка сервера при создании смены');
-      }
-
-      const resJson = await res.json();
-      const createdShift: ShiftReport = resJson.shift;
-
-      // D. If synced to Drive, also save the JSON card and update summary CSV!
+      // Save to Google Drive if connected
       if (accessToken && driveFolderId) {
         try {
-          await saveShiftReportJsonToDrive(createdShift, driveFolderId);
-          await syncSummaryCsvToDrive([createdShift, ...shifts], driveFolderId);
+          await saveShiftReportJsonToDrive(newShift, driveFolderId);
+          await syncSummaryCsvToDrive([newShift, ...shifts], driveFolderId);
         } catch (e) {
-          console.warn('Drive summary sync error:', e);
+          console.warn('Drive summary sync notice:', e);
         }
       }
 
-      // Reload shifts list
       await loadShifts();
       showToast('Смена успешно зафиксирована и сохранена!', 'success');
-
-      return { success: true, shift: createdShift };
+      return { success: true, shift: newShift };
     } catch (err: any) {
       return { success: false, error: err.message || 'Ошибка сохранения' };
     }
@@ -242,25 +244,18 @@ export default function App() {
   // 5. Verify Shift by boss
   const handleVerifyShift = async (shiftId: string) => {
     try {
-      const res = await fetch(`/api/shifts/${shiftId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          verifiedByBoss: true,
-          verifiedAt: new Date().toISOString(),
-        }),
+      await updateLocalShift(shiftId, {
+        verifiedByBoss: true,
+        verifiedAt: new Date().toISOString(),
       });
-
-      if (res.ok) {
-        showToast('Смена утверждена руководителем!', 'success');
-        await loadShifts();
-      }
+      showToast('Смена утверждена руководителем!', 'success');
+      await loadShifts();
     } catch (err) {
       showToast('Ошибка при утверждении смены', 'error');
     }
   };
 
-  // 6. Delete shift with user confirmation dialog (MANDATORY per guidelines)
+  // 6. Delete shift with user confirmation dialog
   const handleDeleteShift = async (shiftId: string, shiftName: string) => {
     const confirmed = window.confirm(
       `Вы действительно хотите удалить запись: "${shiftName}"? Это действие нельзя будет отменить.`
@@ -269,7 +264,6 @@ export default function App() {
 
     try {
       const target = shifts.find((s) => s.id === shiftId);
-      // If there was a Google Drive file, ask to remove from Drive as well
       if (target?.driveFileId && user) {
         try {
           await deleteDriveFileWithConfirmation(
@@ -281,11 +275,9 @@ export default function App() {
         }
       }
 
-      const res = await fetch(`/api/shifts/${shiftId}`, { method: 'DELETE' });
-      if (res.ok) {
-        showToast('Смена успешно удалена', 'info');
-        await loadShifts();
-      }
+      await deleteLocalShift(shiftId);
+      showToast('Смена успешно удалена', 'info');
+      await loadShifts();
     } catch (err) {
       showToast('Ошибка при удалении смены', 'error');
     }
@@ -312,14 +304,9 @@ export default function App() {
       await saveShiftReportJsonToDrive(shift, folderId);
       await syncSummaryCsvToDrive(shifts, folderId);
 
-      // Update backend record
-      await fetch(`/api/shifts/${shift.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          syncedToDrive: true,
-          driveFolderUrl,
-        }),
+      await updateLocalShift(shift.id, {
+        syncedToDrive: true,
+        driveFolderUrl,
       });
 
       await loadShifts();
@@ -329,7 +316,7 @@ export default function App() {
     }
   };
 
-  // 8. Bulk Sync All shifts & Summary CSV to Google Drive
+  // 8. Bulk Sync All shifts to Google Drive
   const handleSyncAllToDrive = async () => {
     const accessToken = await getAccessToken();
     if (!accessToken) {
@@ -347,18 +334,12 @@ export default function App() {
         if (folder.webViewLink) setDriveFolderUrl(folder.webViewLink);
       }
 
-      // Sync summary CSV file
       await syncSummaryCsvToDrive(shifts, folderId);
 
-      // Mark shifts synced
       for (const shift of shifts) {
         if (!shift.syncedToDrive) {
           await saveShiftReportJsonToDrive(shift, folderId);
-          await fetch(`/api/shifts/${shift.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ syncedToDrive: true }),
-          });
+          await updateLocalShift(shift.id, { syncedToDrive: true });
         }
       }
 
@@ -369,6 +350,18 @@ export default function App() {
     } finally {
       setIsSyncingAll(false);
     }
+  };
+
+  // Handler to open video modal (loads IndexedDB video blob if available)
+  const handleOpenVideoModal = async (shift: ShiftReport) => {
+    let playShift = { ...shift };
+    if (!playShift.videoUrl) {
+      const blobUrl = await getLocalVideoUrl(shift.id);
+      if (blobUrl) {
+        playShift.videoUrl = blobUrl;
+      }
+    }
+    setSelectedVideoShift(playShift);
   };
 
   return (
@@ -421,7 +414,7 @@ export default function App() {
             onVerifyShift={handleVerifyShift}
             onDeleteShift={handleDeleteShift}
             onSyncShiftToDrive={handleSyncShiftToDrive}
-            onOpenVideoModal={(shift) => setSelectedVideoShift(shift)}
+            onOpenVideoModal={handleOpenVideoModal}
             onOpenShareModal={() => {
               setShareSpecificShift(null);
               setIsShareModalOpen(true);

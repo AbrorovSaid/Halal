@@ -2,14 +2,12 @@ import React, { useState } from 'react';
 import {
   Truck,
   Beef,
-  Share2,
   HardDrive,
   LogOut,
   FolderOpen,
   CheckCircle2,
   ExternalLink,
   ShieldCheck,
-  FileSpreadsheet
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 
@@ -21,7 +19,7 @@ interface NavbarProps {
   onLogout: () => void;
   isLoggingIn: boolean;
   driveFolderUrl: string | null;
-  onOpenShareModal: () => void;
+  onOpenShareModal?: () => void;
   shiftsCount: number;
 }
 
@@ -94,18 +92,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
 
-          {/* Right Action Tools: Share Link & Google Drive Integration */}
+          {/* Right Action Tools: Google Drive Integration */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Share link button for boss */}
-            <button
-              onClick={onOpenShareModal}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600/90 hover:bg-indigo-600 text-white text-xs sm:text-sm font-medium transition-colors shadow-sm"
-              title="Скопировать ссылку для начальника"
-            >
-              <Share2 className="w-4 h-4" />
-              <span className="hidden md:inline">Ссылка для начальника</span>
-            </button>
-
             {/* Google Drive Status & Auth */}
             {user ? (
               <div className="relative">
