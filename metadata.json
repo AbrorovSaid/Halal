@@ -1,0 +1,6 @@
+{
+  "name": "Журнал сменных отчётов по забою и отгрузке",
+  "description": "Учёт загрузки машин, забоя скота, объёмов мяса (кг/т), видеофиксация и автоматическое сохранение отчётов на Google Диск с доступом для руководителя.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
